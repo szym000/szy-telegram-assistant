@@ -33,9 +33,7 @@ async function interact(ctx, chatID, request) {
                     break;
                 case "choice":
                     const buttons = trace.payload.buttons.map(button => {
-                        // Generate a short unique identifier for the callback data
                         const callbackId = crypto.randomBytes(8).toString('hex');
-                        // Store the detailed request data in the map
                         callbackDataStore.set(callbackId, button.request);
                         return [{ text: button.name, callback_data: callbackId }];
                     });
@@ -70,46 +68,53 @@ bot.hears(ANY_WORD_REGEX, async (ctx) => {
 bot.on('callback_query', async (ctx) => {
     let chatID = ctx.callbackQuery.message.chat.id;
     let callbackId = ctx.callbackQuery.data;
-    // Retrieve the detailed request data from the map
     let request = callbackDataStore.get(callbackId);
     if (request) {
         await interact(ctx, chatID, request);
-        // Optionally, remove the data from the map if it's only needed once
         callbackDataStore.delete(callbackId);
     } else {
         await ctx.reply("Invalid selection, please try again.");
     }
 });
 
-bot.on('photo', async (ctx) => {
+// Handling both photo and document uploads
+bot.on(['photo', 'document'], async (ctx) => {
     try {
-        const file_id = ctx.message.photo[ctx.message.photo.length - 1].file_id; // Get the file_id of the highest resolution photo
-
-        // Get the file path using getFile method
-        const fileResponse = await bot.telegram.getFile(file_id);
-        const filePath = fileResponse.file_path;
-
-        // Construct the URL to access the file
-        const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
+        let fileUrl;
+        // Check if it is a photo
+        if (ctx.message.photo) {
+            const file_id = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            const fileResponse = await bot.telegram.getFile(file_id);
+            const filePath = fileResponse.file_path;
+            fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
+        }
+        // Check if it is a document and a PDF
+        else if (ctx.message.document && ctx.message.document.mime_type === 'application/pdf') {
+            const fileId = ctx.message.document.file_id;
+            const fileResponse = await bot.telegram.getFile(fileId);
+            const filePath = fileResponse.file_path;
+            fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
+        } else {
+            await ctx.reply('Only images and PDF files are supported. Please upload a valid file.');
+            return;
+        }
 
         // Simulate user sending the URL message
         const chatID = ctx.message.chat.id;
-        const username = ctx.message.from.username ? `@${ctx.message.from.username}` : ctx.message.from.first_name;
-
-        // Temporarily modify the message to include the URL as if the user had sent it
         ctx.message.text = fileUrl;
 
-        // Interact with the Voiceflow API using the image URL
+        // Interact with the Voiceflow API using the URL
         await interact(ctx, chatID, {
             type: "text",
             payload: fileUrl
         });
 
     } catch (error) {
-        console.error('Error while getting file URL:', error);
-        await ctx.reply('Sorry, something went wrong while retrieving the image URL.');
+        console.error('Error while processing file:', error);
+        await ctx.reply('Sorry, something went wrong while processing your file.');
     }
 });
+
 
 bot.launch(); // start
 
